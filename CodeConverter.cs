@@ -90,19 +90,7 @@ namespace CSharpToArduino
                         HandleTokenAndTrivia(modifier);
                     }
 
-                    _output.HandleLeadingTrivia(fieldDeclarationSyntax.Declaration.Type);
-                    _output.Add(fieldDeclarationSyntax.Declaration.Type.ToString());
-                    _output.HandleTrailingTrivia(fieldDeclarationSyntax.Declaration.Type);
-
-                    foreach (var variable in fieldDeclarationSyntax.Declaration.Variables)
-                    {
-                        HandleTokenAndTrivia(variable.Identifier);
-                        if (variable.Initializer != null)
-                        {
-                            HandleTokenAndTrivia(variable.Initializer.EqualsToken);
-                            ParseExpressionSyntax(variable.Initializer.Value);
-                        }
-                    }
+                    ParseTypeAndVariables(fieldDeclarationSyntax.Declaration.Type, fieldDeclarationSyntax.Declaration.Variables);
 
                     ParseOperatorToken(fieldDeclarationSyntax.SemicolonToken);
 
@@ -118,6 +106,23 @@ namespace CSharpToArduino
             }
 
             _output.HandleTrailingTrivia(classDeclarationSyntax);
+        }
+
+        private void ParseTypeAndVariables(TypeSyntax type, SeparatedSyntaxList<VariableDeclaratorSyntax> variables)
+        {
+            _output.HandleLeadingTrivia(type);
+            _output.Add(type.ToString());
+            _output.HandleTrailingTrivia(type);
+
+            foreach (var variable in variables)
+            {
+                HandleTokenAndTrivia(variable.Identifier);
+                if (variable.Initializer != null)
+                {
+                    HandleTokenAndTrivia(variable.Initializer.EqualsToken);
+                    ParseExpressionSyntax(variable.Initializer.Value);
+                }
+            }
         }
 
         private void ParseMethodDeclaration(MethodDeclarationSyntax methodDeclarationSyntax)
@@ -234,6 +239,25 @@ namespace CSharpToArduino
                 return;
             }
 
+            ForStatementSyntax forStatementSyntax = statementSyntax as ForStatementSyntax;
+            if (forStatementSyntax != null)
+            {
+                HandleTokenAndTrivia(forStatementSyntax.ForKeyword);
+                HandleTokenAndTrivia(forStatementSyntax.OpenParenToken);
+                ParseTypeAndVariables(forStatementSyntax.Declaration.Type, forStatementSyntax.Declaration.Variables);
+
+                HandleTokenAndTrivia(forStatementSyntax.FirstSemicolonToken);
+                ParseExpressionSyntax(forStatementSyntax.Condition);
+                HandleTokenAndTrivia(forStatementSyntax.SecondSemicolonToken);
+                foreach (var incrementer in forStatementSyntax.Incrementors)
+                {
+                    ParseExpressionSyntax(incrementer);
+                }
+                HandleTokenAndTrivia(forStatementSyntax.CloseParenToken);
+                HandleStatementSyntax(forStatementSyntax.Statement);
+                return;
+            }
+
             int k = 12;
         }
 
@@ -343,7 +367,24 @@ namespace CSharpToArduino
             LiteralExpressionSyntax literalExpressionSyntax = expression as LiteralExpressionSyntax;
             if (literalExpressionSyntax != null)
             {
-                _output.Add(literalExpressionSyntax.Token.ValueText);
+                string typeName = literalExpressionSyntax.Token.Value.GetType().ToString();
+
+                switch (typeName)
+                {
+                    case "System.Single":
+                    case "System.Int32":
+                        _output.Add(literalExpressionSyntax.Token.ValueText);
+                        break;
+
+                    case "System.String":
+                        _output.Add(literalExpressionSyntax.Token.Text);
+                        break;
+
+                    default:
+                        int i = 12;
+                        break;
+                }
+
                 handled = true;
             }
 
@@ -368,6 +409,34 @@ namespace CSharpToArduino
             if (invocationExpressionSyntax != null)
             {
                 ParseInvocationExpressionDeclaration(invocationExpressionSyntax);
+                handled = true;
+            }
+
+            ParenthesizedExpressionSyntax parenthesizedExpressionSyntax = expression as ParenthesizedExpressionSyntax;
+            if (parenthesizedExpressionSyntax != null)
+            {
+                HandleTokenAndTrivia(parenthesizedExpressionSyntax.OpenParenToken);
+                ParseExpressionSyntax(parenthesizedExpressionSyntax.Expression);
+                HandleTokenAndTrivia(parenthesizedExpressionSyntax.CloseParenToken);
+                handled = true;
+            }
+
+            ConditionalExpressionSyntax conditionalExpressionSyntax = expression as ConditionalExpressionSyntax;
+            if (conditionalExpressionSyntax != null)
+            {
+                ParseExpressionSyntax(conditionalExpressionSyntax.Condition);
+                HandleTokenAndTrivia(conditionalExpressionSyntax.QuestionToken);
+                ParseExpressionSyntax(conditionalExpressionSyntax.WhenTrue);
+                HandleTokenAndTrivia(conditionalExpressionSyntax.ColonToken);
+                ParseExpressionSyntax(conditionalExpressionSyntax.WhenFalse);
+                handled = true;
+            }
+
+            PostfixUnaryExpressionSyntax postfixUnaryExpressionSyntax = expression as PostfixUnaryExpressionSyntax;
+            if (postfixUnaryExpressionSyntax != null)
+            {
+                ParseExpressionSyntax(postfixUnaryExpressionSyntax.Operand);
+                HandleTokenAndTrivia(postfixUnaryExpressionSyntax.OperatorToken);
                 handled = true;
             }
 
