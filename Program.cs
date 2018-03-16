@@ -17,6 +17,7 @@ namespace CSharpToArduino
             string filename = @"d:\data\electronics\Blink CSharp\Blink.cs";
             filename = @"d:\data\electronics\Blink CSharp\Fade.cs";
             filename = @"d:\data\electronics\Blink CSharp\DigitalReadSerial.cs";
+            filename = @"d:\data\electronics\Blink CSharp\Debounce.cs";
 
             Outputter output = new CodeConverter().Convert(filename);
 

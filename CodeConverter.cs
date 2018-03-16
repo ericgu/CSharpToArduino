@@ -85,6 +85,11 @@ namespace CSharpToArduino
                 FieldDeclarationSyntax fieldDeclarationSyntax = member as FieldDeclarationSyntax;
                 if (fieldDeclarationSyntax != null)
                 {
+                    foreach (var modifier in fieldDeclarationSyntax.Modifiers)
+                    {
+                        HandleTokenAndTrivia(modifier);
+                    }
+
                     _output.HandleLeadingTrivia(fieldDeclarationSyntax.Declaration.Type);
                     _output.Add(fieldDeclarationSyntax.Declaration.Type.ToString());
                     _output.HandleTrailingTrivia(fieldDeclarationSyntax.Declaration.Type);
@@ -204,6 +209,31 @@ namespace CSharpToArduino
                 return;
             }
 
+            LocalDeclarationStatementSyntax localDeclarationStatementSyntax = statementSyntax as LocalDeclarationStatementSyntax;
+            if (localDeclarationStatementSyntax != null)
+            {
+                _output.HandleLeadingTrivia(localDeclarationStatementSyntax);
+
+                _output.HandleLeadingTrivia(localDeclarationStatementSyntax.Declaration.Type);
+                _output.Add(localDeclarationStatementSyntax.Declaration.Type.ToString());
+                _output.HandleTrailingTrivia(localDeclarationStatementSyntax.Declaration.Type);
+
+                foreach (var variable in localDeclarationStatementSyntax.Declaration.Variables)
+                {
+                    HandleTokenAndTrivia(variable.Identifier);
+                    if (variable.Initializer != null)
+                    {
+                        HandleTokenAndTrivia(variable.Initializer.EqualsToken);
+                        ParseExpressionSyntax(variable.Initializer.Value);
+                    }
+                }
+
+                ParseOperatorToken(localDeclarationStatementSyntax.SemicolonToken);
+
+                _output.HandleTrailingTrivia(localDeclarationStatementSyntax);
+                return;
+            }
+
             int k = 12;
         }
 
@@ -247,6 +277,7 @@ namespace CSharpToArduino
         {
             _output.HandleLeadingTrivia(invocationExpressionSyntax);
 
+            bool handled = false;
             IdentifierNameSyntax identifierNameSyntax = invocationExpressionSyntax.Expression as IdentifierNameSyntax;
 
             if (identifierNameSyntax != null)
@@ -256,6 +287,7 @@ namespace CSharpToArduino
                 _output.Add(identifierNameSyntax.Identifier.Text);
 
                 _output.HandleTrailingTrivia(identifierNameSyntax);
+                handled = true;
             }
 
             MemberAccessExpressionSyntax memberAccessExpressionSyntax = invocationExpressionSyntax.Expression as MemberAccessExpressionSyntax;
@@ -265,7 +297,14 @@ namespace CSharpToArduino
                 _output.HandleLeadingTrivia(memberAccessExpressionSyntax);
 
                 string expression = memberAccessExpressionSyntax.Expression.ToString() + memberAccessExpressionSyntax.OperatorToken + memberAccessExpressionSyntax.Name;
+                _output.Add(expression);
                 _output.HandleTrailingTrivia(memberAccessExpressionSyntax);
+                handled = true;
+            }
+
+            if (!handled)
+            {
+                int k = 15;
             }
 
             ParseOperatorToken(invocationExpressionSyntax.ArgumentList.OpenParenToken);
@@ -322,6 +361,13 @@ namespace CSharpToArduino
             {
                 ParseOperatorToken(prefixUnaryExpressionSyntax.OperatorToken);
                 ParseExpressionSyntax(prefixUnaryExpressionSyntax.Operand);
+                handled = true;
+            }
+
+            InvocationExpressionSyntax invocationExpressionSyntax = expression as InvocationExpressionSyntax;
+            if (invocationExpressionSyntax != null)
+            {
+                ParseInvocationExpressionDeclaration(invocationExpressionSyntax);
                 handled = true;
             }
 
