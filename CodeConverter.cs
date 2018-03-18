@@ -13,6 +13,7 @@ namespace CSharpToArduino
     class CodeConverter
     {
         Outputter _output;
+        Expression _expression;
 
         public Outputter Convert(string filename)
         {
@@ -23,6 +24,7 @@ namespace CSharpToArduino
             var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
 
             _output = new Outputter();
+            _expression = new Expression(_output);
             ParseCompilationUnit((CompilationUnitSyntax)tree.GetRoot());
 
             return _output;
@@ -110,17 +112,30 @@ namespace CSharpToArduino
 
         private void ParseTypeAndVariables(TypeSyntax type, SeparatedSyntaxList<VariableDeclaratorSyntax> variables)
         {
+            string typeString = type.ToString();
+            string variableSuffix = String.Empty;
+
+            int index = typeString.IndexOf("[");
+            if (index != -1)
+            {
+                variableSuffix = typeString.Substring(index);
+                typeString = typeString.Substring(0, index);
+            }
+
             _output.HandleLeadingTrivia(type);
-            _output.Add(type.ToString());
+            _output.Add(typeString);
             _output.HandleTrailingTrivia(type);
 
             foreach (var variable in variables)
             {
-                HandleTokenAndTrivia(variable.Identifier);
+                _output.HandleLeadingTrivia(variable.Identifier);
+                _output.Add(variable.Identifier.ToString() + variableSuffix);
+                _output.HandleTrailingTrivia(variable.Identifier);
+
                 if (variable.Initializer != null)
                 {
                     HandleTokenAndTrivia(variable.Initializer.EqualsToken);
-                    ParseExpressionSyntax(variable.Initializer.Value);
+                    _expression.ParseExpressionSyntax(variable.Initializer.Value);
                 }
             }
         }
@@ -140,7 +155,7 @@ namespace CSharpToArduino
             _output.HandleTrailingTrivia(methodDeclarationSyntax);
         }
 
-        private void HandleTokenAndTrivia(SyntaxToken syntaxToken)
+        public void HandleTokenAndTrivia(SyntaxToken syntaxToken)
         {
             _output.HandleLeadingTrivia(syntaxToken);
             _output.Add(syntaxToken.ToString());
@@ -195,7 +210,7 @@ namespace CSharpToArduino
 
                 ParseOperatorToken(ifStatementSyntax.IfKeyword);
                 ParseOperatorToken(ifStatementSyntax.OpenParenToken);
-                ParseExpressionSyntax(ifStatementSyntax.Condition);
+                _expression.ParseExpressionSyntax(ifStatementSyntax.Condition);
                 ParseOperatorToken(ifStatementSyntax.CloseParenToken);
 
                 HandleStatementSyntax(ifStatementSyntax.Statement);
@@ -229,7 +244,7 @@ namespace CSharpToArduino
                     if (variable.Initializer != null)
                     {
                         HandleTokenAndTrivia(variable.Initializer.EqualsToken);
-                        ParseExpressionSyntax(variable.Initializer.Value);
+                        _expression.ParseExpressionSyntax(variable.Initializer.Value);
                     }
                 }
 
@@ -247,14 +262,59 @@ namespace CSharpToArduino
                 ParseTypeAndVariables(forStatementSyntax.Declaration.Type, forStatementSyntax.Declaration.Variables);
 
                 HandleTokenAndTrivia(forStatementSyntax.FirstSemicolonToken);
-                ParseExpressionSyntax(forStatementSyntax.Condition);
+                _expression.ParseExpressionSyntax(forStatementSyntax.Condition);
                 HandleTokenAndTrivia(forStatementSyntax.SecondSemicolonToken);
                 foreach (var incrementer in forStatementSyntax.Incrementors)
                 {
-                    ParseExpressionSyntax(incrementer);
+                    _expression.ParseExpressionSyntax(incrementer);
                 }
                 HandleTokenAndTrivia(forStatementSyntax.CloseParenToken);
                 HandleStatementSyntax(forStatementSyntax.Statement);
+                return;
+            }
+
+            SwitchStatementSyntax switchStatementSyntax = statementSyntax as SwitchStatementSyntax;
+            if (switchStatementSyntax != null)
+            {
+                HandleTokenAndTrivia(switchStatementSyntax.SwitchKeyword);
+
+                HandleTokenAndTrivia(switchStatementSyntax.OpenParenToken);
+                _expression.ParseExpressionSyntax(switchStatementSyntax.Expression);
+                HandleTokenAndTrivia(switchStatementSyntax.CloseParenToken);
+
+                HandleTokenAndTrivia(switchStatementSyntax.OpenBraceToken);
+
+                foreach (SwitchSectionSyntax switchSectionSyntax in switchStatementSyntax.Sections)
+                {
+                    foreach (SwitchLabelSyntax switchLabelSyntax in switchSectionSyntax.Labels)
+                    {
+                        HandleTokenAndTrivia(switchLabelSyntax.Keyword);
+
+                        CaseSwitchLabelSyntax caseSwitchLabelSyntax = switchLabelSyntax as CaseSwitchLabelSyntax;
+                        if (caseSwitchLabelSyntax != null)
+                        {
+                            _expression.ParseExpressionSyntax(caseSwitchLabelSyntax.Value);
+                        }
+
+                        HandleTokenAndTrivia(switchLabelSyntax.ColonToken);
+                    }
+
+                    foreach (StatementSyntax childStatementSyntax in switchSectionSyntax.Statements)
+                    {
+                        HandleStatementSyntax(childStatementSyntax);
+                    }
+                }
+
+                HandleTokenAndTrivia(switchStatementSyntax.CloseBraceToken);
+
+                return;
+            }
+
+            BreakStatementSyntax breakStatementSyntax = statementSyntax as BreakStatementSyntax;
+            if (breakStatementSyntax != null)
+            {
+                HandleTokenAndTrivia(breakStatementSyntax.BreakKeyword);
+                HandleTokenAndTrivia(breakStatementSyntax.SemicolonToken);
                 return;
             }
 
@@ -278,9 +338,9 @@ namespace CSharpToArduino
                 AssignmentExpressionSyntax alignmentExpressionSyntax = childNode as AssignmentExpressionSyntax;
                 if (alignmentExpressionSyntax != null)
                 {
-                    ParseExpressionSyntax(alignmentExpressionSyntax.Left);
+                    _expression.ParseExpressionSyntax(alignmentExpressionSyntax.Left);
                     ParseOperatorToken(alignmentExpressionSyntax.OperatorToken);
-                    ParseExpressionSyntax(alignmentExpressionSyntax.Right);
+                    _expression.ParseExpressionSyntax(alignmentExpressionSyntax.Right);
                 }
 
                 _output.HandleTrailingTrivia(childNode);
@@ -299,18 +359,23 @@ namespace CSharpToArduino
 
         private void ParseInvocationExpressionDeclaration(InvocationExpressionSyntax invocationExpressionSyntax)
         {
-            _output.HandleLeadingTrivia(invocationExpressionSyntax);
+            ParseInvocationExpressionDeclaration(_output, _expression, invocationExpressionSyntax);
+        }
+
+        public static void ParseInvocationExpressionDeclaration(Outputter output, Expression expression, InvocationExpressionSyntax invocationExpressionSyntax)
+        {
+            output.HandleLeadingTrivia(invocationExpressionSyntax);
 
             bool handled = false;
             IdentifierNameSyntax identifierNameSyntax = invocationExpressionSyntax.Expression as IdentifierNameSyntax;
 
             if (identifierNameSyntax != null)
             {
-                _output.HandleLeadingTrivia(identifierNameSyntax);
+                output.HandleLeadingTrivia(identifierNameSyntax);
 
-                _output.Add(identifierNameSyntax.Identifier.Text);
+                output.Add(identifierNameSyntax.Identifier.Text);
 
-                _output.HandleTrailingTrivia(identifierNameSyntax);
+                output.HandleTrailingTrivia(identifierNameSyntax);
                 handled = true;
             }
 
@@ -318,11 +383,11 @@ namespace CSharpToArduino
 
             if (memberAccessExpressionSyntax != null)
             {
-                _output.HandleLeadingTrivia(memberAccessExpressionSyntax);
+                output.HandleLeadingTrivia(memberAccessExpressionSyntax);
 
-                string expression = memberAccessExpressionSyntax.Expression.ToString() + memberAccessExpressionSyntax.OperatorToken + memberAccessExpressionSyntax.Name;
-                _output.Add(expression);
-                _output.HandleTrailingTrivia(memberAccessExpressionSyntax);
+                string expressionString = memberAccessExpressionSyntax.Expression.ToString() + memberAccessExpressionSyntax.OperatorToken + memberAccessExpressionSyntax.Name;
+                output.Add(expressionString);
+                output.HandleTrailingTrivia(memberAccessExpressionSyntax);
                 handled = true;
             }
 
@@ -331,122 +396,33 @@ namespace CSharpToArduino
                 int k = 15;
             }
 
-            ParseOperatorToken(invocationExpressionSyntax.ArgumentList.OpenParenToken);
+            ParseOperatorToken(output, invocationExpressionSyntax.ArgumentList.OpenParenToken);
 
             bool first = true;
             foreach (ArgumentSyntax argument in invocationExpressionSyntax.ArgumentList.Arguments)
             {
                 if (!first)
                 {
-                    _output.Add(", ");
+                    output.Add(", ");
                 }
                 first = false;
 
-                ParseExpressionSyntax(argument.Expression);
+                expression.ParseExpressionSyntax(argument.Expression);
             }
 
-            ParseOperatorToken(invocationExpressionSyntax.ArgumentList.CloseParenToken);
+            ParseOperatorToken(output, invocationExpressionSyntax.ArgumentList.CloseParenToken);
 
-            _output.HandleTrailingTrivia(invocationExpressionSyntax);
+            output.HandleTrailingTrivia(invocationExpressionSyntax);
         }
 
-        private void ParseExpressionSyntax(ExpressionSyntax expression)
+        private static void ParseOperatorToken(Outputter output, SyntaxToken operatorToken)
         {
-            _output.HandleLeadingTrivia(expression);
-            bool handled = false;
-
-            IdentifierNameSyntax identifierNameSyntax = expression as IdentifierNameSyntax;
-            if (identifierNameSyntax != null)
-            {
-                _output.HandleLeadingTrivia(identifierNameSyntax.Identifier);
-                _output.Add(identifierNameSyntax.Identifier.Text);
-                _output.HandleTrailingTrivia(identifierNameSyntax.Identifier);
-                handled = true;
-            }
-
-            LiteralExpressionSyntax literalExpressionSyntax = expression as LiteralExpressionSyntax;
-            if (literalExpressionSyntax != null)
-            {
-                string typeName = literalExpressionSyntax.Token.Value.GetType().ToString();
-
-                switch (typeName)
-                {
-                    case "System.Single":
-                    case "System.Int32":
-                        _output.Add(literalExpressionSyntax.Token.ValueText);
-                        break;
-
-                    case "System.String":
-                        _output.Add(literalExpressionSyntax.Token.Text);
-                        break;
-
-                    default:
-                        int i = 12;
-                        break;
-                }
-
-                handled = true;
-            }
-
-            BinaryExpressionSyntax binaryExpressionSyntax = expression as BinaryExpressionSyntax;
-            if (binaryExpressionSyntax != null)
-            {
-                ParseExpressionSyntax(binaryExpressionSyntax.Left);
-                ParseOperatorToken(binaryExpressionSyntax.OperatorToken);
-                ParseExpressionSyntax(binaryExpressionSyntax.Right);
-                handled = true;
-            }
-
-            PrefixUnaryExpressionSyntax prefixUnaryExpressionSyntax = expression as PrefixUnaryExpressionSyntax;
-            if (prefixUnaryExpressionSyntax != null)
-            {
-                ParseOperatorToken(prefixUnaryExpressionSyntax.OperatorToken);
-                ParseExpressionSyntax(prefixUnaryExpressionSyntax.Operand);
-                handled = true;
-            }
-
-            InvocationExpressionSyntax invocationExpressionSyntax = expression as InvocationExpressionSyntax;
-            if (invocationExpressionSyntax != null)
-            {
-                ParseInvocationExpressionDeclaration(invocationExpressionSyntax);
-                handled = true;
-            }
-
-            ParenthesizedExpressionSyntax parenthesizedExpressionSyntax = expression as ParenthesizedExpressionSyntax;
-            if (parenthesizedExpressionSyntax != null)
-            {
-                HandleTokenAndTrivia(parenthesizedExpressionSyntax.OpenParenToken);
-                ParseExpressionSyntax(parenthesizedExpressionSyntax.Expression);
-                HandleTokenAndTrivia(parenthesizedExpressionSyntax.CloseParenToken);
-                handled = true;
-            }
-
-            ConditionalExpressionSyntax conditionalExpressionSyntax = expression as ConditionalExpressionSyntax;
-            if (conditionalExpressionSyntax != null)
-            {
-                ParseExpressionSyntax(conditionalExpressionSyntax.Condition);
-                HandleTokenAndTrivia(conditionalExpressionSyntax.QuestionToken);
-                ParseExpressionSyntax(conditionalExpressionSyntax.WhenTrue);
-                HandleTokenAndTrivia(conditionalExpressionSyntax.ColonToken);
-                ParseExpressionSyntax(conditionalExpressionSyntax.WhenFalse);
-                handled = true;
-            }
-
-            PostfixUnaryExpressionSyntax postfixUnaryExpressionSyntax = expression as PostfixUnaryExpressionSyntax;
-            if (postfixUnaryExpressionSyntax != null)
-            {
-                ParseExpressionSyntax(postfixUnaryExpressionSyntax.Operand);
-                HandleTokenAndTrivia(postfixUnaryExpressionSyntax.OperatorToken);
-                handled = true;
-            }
-
-            if (!handled)
-            {
-                int k = 12;
-            }
-
-            _output.HandleTrailingTrivia(expression);
+            output.HandleLeadingTrivia(operatorToken);
+            output.Add(operatorToken.ValueText);
+            output.HandleTrailingTrivia(operatorToken);
         }
+
+
 
 #if fred
         private void ParseMethodDeclaration(List<string>  node)
